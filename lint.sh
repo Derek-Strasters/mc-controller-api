@@ -18,4 +18,5 @@ poetry run pydocstyle .
 sep
 poetry run mypy .
 sep
+poetry export > requirements.txt
 #poetry run pytest

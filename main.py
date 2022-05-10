@@ -4,19 +4,32 @@ import os
 from pathlib import Path
 
 import docker as docker_package
+import fastapi
 import tomli
-import fastapi as fa
 
 MC_SERVER_NAME = os.environ.get("MC_DOCKER_NAME", "mc-server")
 DOCKER_BASE_URL = os.environ.get("DOCKER_BASE_URL", "unix://var/run/docker.sock")
 
-app = fa.FastAPI()
+app = fastapi.FastAPI()
 docker = docker_package.DockerClient(base_url=DOCKER_BASE_URL)
 MC_ROOT = Path("/data")
 LEVELS_DIR = MC_ROOT / "worlds"
 
-with open(Path("pyproject.toml"), "rb") as pyproject:
-    __version__ = tomli.load(pyproject).get("tool.poetry", {}).get("version", "0.0.0")
+__version__ = None
+
+
+@app.on_event("startup")
+def startup_event():
+    """Single source the version number from the pyproject.toml file."""
+    global __version__
+    pyproject_path = Path("pyproject.toml")
+    if pyproject_path.is_file():
+        with pyproject_path.open("rb") as pyproject:
+            __version__ = tomli.load(pyproject).get("tool", {}).get("poetry", {}).get("version", "???")
+            # TODO: make a log
+            print(f"Version {__version__}")
+    else:
+        __version__ = "???"
 
 
 @app.get("/")
@@ -26,14 +39,14 @@ async def root():
 
 
 @app.get("/status/")
-async def status():
+def status():
     """Return whether the server is running or not."""
     return {"status": docker.containers.get(MC_SERVER_NAME).status}
 
 
 @app.get("/levels/{level_name}")
 async def levels(level_name: str = None):
-    """Return a list of levels or details of a level"""
+    """Return a list of levels or details of a level."""
     if level_name is None:
         level_list = list(level.name for level in LEVELS_DIR.iterdir())
         return {"levels": level_list}
@@ -56,12 +69,13 @@ async def levels(level_name: str = None):
                 "name": level_name,
                 "behavior_packs": behavior_packs,
                 "resource_packs": resource_packs,
-            }
+            },
         }
 
-    raise fa.HTTPException(status_code=404, detail="That level was not fu*king found!")
+    raise fastapi.HTTPException(status_code=404, detail="That level was not fu*king found!")
 
 
 @app.post("/controller/")
 async def controller():
+    """Issue control commands to the Minecraft server."""
     pass
