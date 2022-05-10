@@ -10,7 +10,6 @@ fastapi = "*"
 uvicorn = "*"
 docker = "*"
 tomli = "*"
-requests = "*"
 
 [tool.poetry.dev-dependencies]
 pre-commit = "*"

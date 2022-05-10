@@ -45,7 +45,7 @@ def status():
 
 
 @app.get("/levels/{level_name}")
-async def levels(level_name: str = None):
+def levels(level_name: str = None):
     """Return a list of levels or details of a level."""
     if level_name is None:
         level_list = list(level.name for level in LEVELS_DIR.iterdir())
@@ -76,6 +76,6 @@ async def levels(level_name: str = None):
 
 
 @app.post("/controller/")
-async def controller():
+def controller():
     """Issue control commands to the Minecraft server."""
     pass
