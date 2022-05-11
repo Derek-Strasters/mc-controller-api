@@ -1,11 +1,21 @@
 # Test your FastAPI endpoints
 
-GET http://127.0.0.1:8000/
+GET http://127.0.0.1:80/
 Accept: application/json
 
 ###
 
-GET http://127.0.0.1:8000/status/
+GET http://127.0.0.1:80/status/
+Accept: application/json
+
+###
+
+GET http://127.0.0.1:80/levels/NEW
+Accept: application/json
+
+###
+
+GET http://127.0.0.1:80/levels
 Accept: application/json
 
 ###
