@@ -38,6 +38,8 @@ def startup_event():
 
 
 class Version(BaseModel):
+    """Model for the level app version."""
+
     version: int
 
 
@@ -56,6 +58,8 @@ async def root():
 
 
 class BehaviorPack(BaseModel):
+    """Model for an MC behavior pack."""
+
     name: str | None = None
     can_be_redownloaded: bool | None = None
     uuid: UUID
@@ -63,6 +67,8 @@ class BehaviorPack(BaseModel):
 
 
 class ResourcePack(BaseModel):
+    """Model for an MC resource pack."""
+
     name: str | None = None
     can_be_redownloaded: bool | None = None
     uuid: UUID
@@ -70,6 +76,8 @@ class ResourcePack(BaseModel):
 
 
 class Level(BaseModel):
+    """Model for an MC level."""
+
     name: str
     behavior_packs: list[BehaviorPack] | None = None
     resource_packs: list[ResourcePack] | None = None
@@ -136,6 +144,8 @@ def update_current_level():
 
 
 class Actions(str, Enum):
+    """List of server actions."""
+
     start = "start"
     stop = "stop"
     restart = "restart"
@@ -143,20 +153,28 @@ class Actions(str, Enum):
 
 
 class ControlOut(BaseModel):
+    """Model for server control response."""
+
     action: Actions
     message: str | None = None
 
 
 class ControlIn(BaseModel):
+    """Model for server control request."""
+
     action: Actions
 
 
 class Statuses(str, Enum):
+    """List of docker container statuses."""
+
     running = "running"
     exited = "exited"
 
 
 class Status(BaseModel):
+    """Response model for docker container status."""
+
     status: Statuses
 
 
