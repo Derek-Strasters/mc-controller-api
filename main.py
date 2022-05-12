@@ -59,14 +59,14 @@ class BehaviorPack(BaseModel):
     name: str | None = None
     can_be_redownloaded: bool | None = None
     uuid: UUID
-    version: conlist(int, min_items=3, max_items=3)
+    version: conlist(int, min_items=3, max_items=3)  # type: ignore
 
 
 class ResourcePack(BaseModel):
     name: str | None = None
     can_be_redownloaded: bool | None = None
     uuid: UUID
-    version: conlist(int, min_items=3, max_items=3)
+    version: conlist(int, min_items=3, max_items=3)  # type: ignore
 
 
 class Level(BaseModel):
