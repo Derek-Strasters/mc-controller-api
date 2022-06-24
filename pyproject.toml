@@ -59,3 +59,4 @@ match-dir = "(?!venv|dist).*"
 
 [tool.mypy]
 ignore_missing_imports = true
+plugins = 'pydantic.mypy'

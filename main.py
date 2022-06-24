@@ -8,11 +8,12 @@ from enum import Enum
 from uuid import UUID
 
 import docker as docker_package
+import docker.errors as docker_errors
 import tomli
-from fastapi import Body, FastAPI, HTTPException
-from pydantic import BaseModel, conlist
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, ValidationError, validator
 
-MC_SERVER_NAME = os.environ.get("MC_DOCKER_NAME", "mc-server")
+MC_DOCKER_NAME = os.environ.get("MC_DOCKER_NAME", "mc-server")
 DOCKER_BASE_URL = os.environ.get("DOCKER_BASE_URL", "unix://var/run/docker.sock")
 
 app = FastAPI()
@@ -28,12 +29,12 @@ def startup_event():
     """Single source the version number from the pyproject.toml file."""
     global __version__
     pyproject_path = pathlib.Path("pyproject.toml")
-    if pyproject_path.is_file():
+    try:
         with pyproject_path.open("rb") as pyproject:
             __version__ = tomli.load(pyproject).get("tool", {}).get("poetry", {}).get("version", "???")
-            # TODO: # TODO Make a log
+            # TODO: # TODO Make a logger, replace print statements
             print(f"Version {__version__}")
-    else:
+    except FileNotFoundError:
         __version__ = "???"
 
 
@@ -57,22 +58,28 @@ async def root():
 # --- --- --- --- --- --- --- --- --- ---
 
 
-class BehaviorPack(BaseModel):
+class MCPack(BaseModel):
+    """Parent model for MC behavior and resource packs."""
+
+    name: str | None = None
+    subpack: str | None = None
+    can_be_redownloaded: bool | None = None
+    pack_id: UUID
+    version: list[int] = Field(example=[1, 11, 9])
+
+    # noinspection PyMethodParameters
+    @validator("version")
+    def _check_version_format(cls, ver):
+        if len(ver) != 3:
+            raise ValidationError("Pack version requires major, minor, and patch versions.")
+
+
+class BehaviorPack(MCPack):
     """Model for an MC behavior pack."""
 
-    name: str | None = None
-    can_be_redownloaded: bool | None = None
-    uuid: UUID
-    version: conlist(int, min_items=3, max_items=3)  # type: ignore
 
-
-class ResourcePack(BaseModel):
+class ResourcePack(MCPack):
     """Model for an MC resource pack."""
-
-    name: str | None = None
-    can_be_redownloaded: bool | None = None
-    uuid: UUID
-    version: conlist(int, min_items=3, max_items=3)  # type: ignore
 
 
 class Level(BaseModel):
@@ -89,7 +96,7 @@ class Level(BaseModel):
     response_model_exclude_unset=True,
 )
 def read_levels():
-    """Return a list of levels."""
+    """Return a list of levels currently installed on the server."""
     level_list: list[Level] = list(read_level(level.name) for level in LEVELS_DIR.iterdir())
     return level_list
 
@@ -100,22 +107,31 @@ def read_levels():
     response_model_exclude_unset=True,
 )
 def read_level(level_name: str):
-    """Return the details of a level."""
+    """Return the details of a level.
+
+    Details include the name of the level and any installed mod packs.
+    """
     level_dir = LEVELS_DIR / level_name
-    if level_dir.is_dir():
-        level: Level = Level(name=level_name)
+    if not level_dir.is_dir():
+        raise HTTPException(status_code=404, detail="That level was not flippin found!")
 
-        if (level_dir / "world_behavior_packs.json").is_file():
-            with (level_dir / "world_behavior_packs.json").open() as bp_file:
-                level.behavior_packs = json.load(bp_file)
+    level: Level = Level(name=level_name)
 
-        if (level_dir / "world_resource_packs.json").is_file():
-            with (level_dir / "world_resource_packs.json").open() as rp_file:
-                level.resource_packs = json.load(rp_file)
+    try:
+        with (level_dir / "world_behavior_packs.json").open() as bp_file:
+            level.behavior_packs = json.load(bp_file)
+    except FileNotFoundError:
+        pass
 
-        return level
+    try:
+        with (level_dir / "world_resource_packs.json").open() as rp_file:
+            level.resource_packs = json.load(rp_file)
+    except FileNotFoundError:
+        pass
 
-    raise HTTPException(status_code=404, detail="That level was not fu*king found!")
+    print(level)
+
+    return level
 
 
 @app.get(
@@ -124,7 +140,10 @@ def read_level(level_name: str):
     response_model_exclude_unset=True,
 )
 def read_current_level():
-    """Return the current level."""
+    """Return the details of the current level.
+
+    Details include the name of the level and any installed mod packs.
+    """
     # TODO: # TODO STUB
     pass
 
@@ -143,39 +162,28 @@ def update_current_level():
 # --- --- --- --- --- --- --- --- --- ---
 
 
-class Actions(str, Enum):
-    """List of server actions."""
+class ContainerAction(str, Enum):
+    """List of server actions.
+
+    These are allowed attributes and methods of the `docker.models.containers.Container` class.
+    """
 
     start = "start"
     stop = "stop"
     restart = "restart"
-    status = "status"
-
-
-class ControlOut(BaseModel):
-    """Model for server control response."""
-
-    action: Actions
-    message: str | None = None
 
 
 class ControlIn(BaseModel):
     """Model for server control request."""
 
-    action: Actions
+    action: ContainerAction
 
 
-class Statuses(str, Enum):
-    """List of docker container statuses."""
+class ControlOut(BaseModel):
+    """Model for server control response."""
 
-    running = "running"
-    exited = "exited"
-
-
-class Status(BaseModel):
-    """Response model for docker container status."""
-
-    status: Statuses
+    action: ContainerAction
+    message: str | None = None
 
 
 @app.post(
@@ -184,25 +192,74 @@ class Status(BaseModel):
     response_model_exclude_unset=True,
     response_model_exclude_none=True,
 )
-def create_control(control_in: ControlIn = Body(..., embed=True)):
+def create_control(control_in: ControlIn) -> ControlOut:
     """Issue control commands to the Minecraft server."""
-    container = docker.containers.get(MC_SERVER_NAME)
+    try:
+        # Get the desired method or attribute for the MC server docker container action and execute.
+        container = docker.containers.get(MC_DOCKER_NAME)
 
-    # Get the desired method for the MC server docker container action and execute.
-    action = getattr(container, control_in.action)
-    if callable(action):
-        action()
-        return control_in
-    else:
-        return ControlOut(**control_in.dict(), message=action)
+        # If action is a method
+        match control_in.action:
+            case ContainerAction.start:
+                container.start()
+            case ContainerAction.stop:
+                container.stop()
+            case ContainerAction.restart:
+                container.restart()
+            case _:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Whoops! The developer forgot to implement that!",
+                )
+
+        return ControlOut(**control_in.dict(), message="success")
+
+    except docker_errors.NotFound:
+        raise HTTPException(
+            status_code=404,
+            detail=f"That container ({MC_DOCKER_NAME}) was not flippin found!",
+        )
+    except docker_errors.APIError:
+        raise HTTPException(status_code=500, detail="There was an error from the Docker API!")
+
+
+class ContainerStatusValue(str, Enum):
+    """List of valid docker container statuses."""
+
+    running = "running"
+    exited = "exited"
+
+
+class ContainerStatus(BaseModel):
+    """Response model for docker container status."""
+
+    status: ContainerStatusValue
 
 
 @app.get(
     "/status/",
-    response_model=Status,
+    response_model=ContainerStatus,
 )
 def read_status():
-    """Return whether the server is running or not."""
-    control = ControlIn()
-    control.action = Actions.status
-    return create_control(control)
+    """Return whether the server is running or not.
+
+    Equivalent to a POST to the control path for status.
+    """
+    try:
+        container = docker.containers.get(MC_DOCKER_NAME)
+        container_status = container.status
+        try:
+            return ContainerStatus(container_status)
+        except ValidationError:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ack! The container returned and invalid status: {container_status}",
+            )
+
+    except docker_errors.NotFound:
+        raise HTTPException(
+            status_code=404,
+            detail=f"That container ({MC_DOCKER_NAME}) was not flippin found!",
+        )
+    except docker_errors.APIError:
+        raise HTTPException(status_code=500, detail="There was an error from the Docker API!")
